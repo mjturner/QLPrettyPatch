@@ -8,6 +8,7 @@
 
 #import <QuickLook/QuickLook.h>
 #import <Ruby/ruby.h>
+#import <Ruby/ruby/version.h>
 #import <WebKit/WebKit.h>
 
 #ifdef DEBUG
@@ -38,10 +39,26 @@ NSData *GeneratePrettyHTMLForPatchAtURL(CFURLRef patchURLRef, CFBundleRef genera
 
     char prettyPatchPathFSRep[QLMaxPathSize];
     [prettyPatchPath getFileSystemRepresentation:prettyPatchPathFSRep maxLength:QLMaxPathLength];
+
+    // Cater for differing API
+#if RUBY_API_VERSION_CODE > 10900
+    int rb_execStatus = 0;
+    int rb_state = 0;
+    
+    rb_load_file(prettyPatchPathFSRep);
+    char* options[] = {"", prettyPatchPathFSRep };
+    void *node = ruby_options(2, options);
+    if (ruby_executable_node(node, &rb_state)) {
+        rb_execStatus = ruby_exec_node(node);
+        QLDebugLog(@"ruby_exec_node() returned status code %d.", rb_execStatus);
+    }
+#else
     rb_load_file(prettyPatchPathFSRep);
 
     int rb_execStatus = ruby_exec();
+    
     QLDebugLog(@"ruby_exec() returned status code %d.", rb_execStatus);
+#endif
 
     void (^cleanup_and_finalize_ruby)(void) = ^{
         ruby_cleanup(rb_execStatus);
@@ -52,7 +69,9 @@ NSData *GeneratePrettyHTMLForPatchAtURL(CFURLRef patchURLRef, CFBundleRef genera
     NSString *patchString = [NSString stringWithContentsOfURL:(NSURL *)patchURLRef encoding:NSUTF8StringEncoding error:&error];
     if (!patchString) {
         QLDebugLog(@"Failed to read patch file at URL '%@' (%@).", (NSURL *)patchURLRef, [error localizedDescription]);
+#if RUBY_API_VERSION_CODE < 10900
         cleanup_and_finalize_ruby();
+#endif
         return nil;
     }
 
@@ -65,7 +84,9 @@ NSData *GeneratePrettyHTMLForPatchAtURL(CFURLRef patchURLRef, CFBundleRef genera
     char * patchPrettyCString = StringValueCStr(rb_patchPrettyString);
     NSString *patchPrettyString = [NSString stringWithCString:patchPrettyCString encoding:NSUTF8StringEncoding];
 
+#if RUBY_API_VERSION_CODE < 10900
     cleanup_and_finalize_ruby();
+#endif
 
     return [patchPrettyString dataUsingEncoding:NSUTF8StringEncoding];
 }
